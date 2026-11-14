@@ -522,7 +522,9 @@ class InstallerTests(unittest.TestCase):
         self.assertFalse(self.app.exists())
 
     def test_non_apple_silicon_is_rejected_before_installation(self):
-        (self.root / "commands/uname").write_text("#!/bin/sh\necho x86_64\n")
+        (self.root / "commands/uname").write_text(
+            '#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo x86_64;; *) exit 1;; esac\n'
+        )
         self.publish("1.0")
         result = self.install()
         self.assertNotEqual(result.returncode, 0)
