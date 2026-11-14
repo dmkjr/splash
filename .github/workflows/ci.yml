@@ -32,8 +32,8 @@ permissions:
 jobs:
   engine-check:
     name: Production, CPU runtime, native builds and the app
-    # Stable Xcode/Metal image; the macOS 27 image currently selects Xcode RC.
-    runs-on: blacksmith-6vcpu-macos-latest
+    # Use a supported host OS and stable Xcode/Metal image.
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -48,7 +48,7 @@ jobs:
       - name: Build every native test and tool
         run: make check-native-build
       - name: Test the desktop app
-        run: make check-app
+        run: sh dev/tools/check_app_ci.sh
 
   sanitizers:
     name: Native sanitizers
@@ -65,7 +65,7 @@ jobs:
 
   python-compatibility:
     name: Python compatibility ${{ matrix.python-version }}
-    runs-on: blacksmith-6vcpu-macos-latest
+    runs-on: macos-26
     timeout-minutes: 20
     strategy:
       fail-fast: false

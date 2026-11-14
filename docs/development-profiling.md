@@ -153,11 +153,20 @@ do not claim that GitHub-hosted Metal validation has passed.
 
 ## Hosted CI Metal bootstrap
 
-The production/app and Python jobs use Blacksmith's stable default macOS image
-(`blacksmith-6vcpu-macos-latest`, documented as macOS 26) with its default Xcode
-toolchain; the macOS 27 image selected an Xcode release candidate whose Metal asset
-catalog repeatedly failed. Native sanitizers retain macOS 27 coverage. The 26.4
-production deployment floor is unchanged.
+The production/app and Python jobs request the standard GitHub macOS 26 image.
+The earlier Blacksmith stable-default image booted macOS 26.3, below the 26.4
+production floor, while its macOS 27 image selected an Xcode release candidate
+whose Metal catalog repeatedly failed. Native sanitizers retain macOS 27
+coverage; the production deployment floor is unchanged.
+
+Installer lifecycle fixtures supply their own supported OS/architecture. Separate
+regressions verify rejection of macOS 26.3 and non-Apple-Silicon hosts before any
+installation; the production installer guard is unchanged. CI's app step uses
+`sh dev/tools/check_app_ci.sh` to disable Reduce Motion only for the animation
+suite and restore the runner's original value (or absent key) on exit. Seven
+subprocess tests cover restoration, absent/disabled preferences, application
+failure, mutation failure and unexpected input without touching real preferences.
+The combined targeted installer/preference-guard suite passed 19 tests on M5.
 
 Hosted CI runs `python3 dev/tools/ensure_metal_toolchain.py` before the native
 and Python compatibility gates. An unconditional component download previously
