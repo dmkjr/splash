@@ -75,9 +75,9 @@ ModelStepResult step(model::Runtime &runtime, uint64_t id, uint64_t position,
 void run(const char *metallib) {
   const test::TemporaryDirectory root("splash-ram-continuation");
   for (const bool flashNext : {false, true}) {
-    auto config = flashNext ? test::flashNextConfig(metallib, root.path() / "flash-next",
-                                                    gguf_fixtures::kPleTableRows, 2560, 8)
-                            : test::loadableConfig(metallib, root.path() / "dense", "ram-continuation-unit");
+    auto config = flashNext
+        ? test::flashNextConfig(metallib, root.path() / "flash-next", gguf_fixtures::kPleTableRows, 2560, 8)
+        : test::loadableConfig(metallib, root.path() / "dense", "ram-continuation-unit");
     config.aneFfn.enabled = false;
     config.verifyRows = model::VerifyRows::All;
     if (flashNext) {
@@ -196,6 +196,42 @@ void run(const char *metallib) {
       rejects([&] { static_cast<void>(runtime->restoreParkedRequest(202)); }, "unknown request",
               "cancelled parked request was resurrected");
       runtime->end(101);
+      // A greedy zero-weight control accepts an entire draft block. It
+      // exercises the largest pending-row copy as well as sampled single rows.
+      for (const auto *pages : {&baselinePages, &parkedPages, &intruderPages})
+        for (const uint32_t page : *pages) pool.clearPage(page);
+      auto greedyBase = input(601), greedyParked = input(602);
+      greedyBase.sampling = {};
+      greedyParked.sampling = {};
+      runtime->beginColdRequest(greedyBase.modelView(), 0);
+      runtime->beginColdRequest(greedyParked.modelView(), 1);
+      static_cast<void>(step(*runtime, 601, 0, baselinePages, prompt));
+      static_cast<void>(step(*runtime, 602, 0, parkedPages, prompt));
+      const auto fullBase = step(*runtime, 601, prompt.size(), baselinePages);
+      const auto fullParked = step(*runtime, 602, prompt.size(), parkedPages);
+      require(fullBase.acceptedDraftTokens > 0 &&
+                  fullBase.acceptedDraftTokens == fullBase.draftedTokens &&
+                  fullBase.outputTokens == fullParked.outputTokens,
+              "greedy continuation fixture did not accept the full draft block");
+      const auto fullState = state(*runtime, storage, 1);
+      require(fullState.metadata.pendingRows > 1 && runtime->parkDecodedRequest(602).granted(),
+              "full-acceptance state did not park multiple retained rows");
+      runtime->beginColdRequest(intruder.modelView(), 1);
+      static_cast<void>(step(*runtime, 303, 0, intruderPages, prompt));
+      static_cast<void>(step(*runtime, 303, prompt.size(), intruderPages));
+      const auto fullRestored = runtime->restoreParkedRequest(602);
+      require(fullRestored.granted() && *fullRestored.lane == 2,
+              "full-acceptance continuation did not rebind");
+      equal(fullState, state(*runtime, storage, 2));
+      const uint64_t fullPosition = prompt.size() + fullBase.outputTokens.size();
+      const auto afterBase = step(*runtime, 601, fullPosition, baselinePages);
+      const auto afterParked = step(*runtime, 602, fullPosition, parkedPages);
+      require(afterBase.outputTokens == afterParked.outputTokens &&
+                  afterBase.acceptedDraftTokens == afterParked.acceptedDraftTokens,
+              "full-acceptance continuation changed output after restoration");
+      runtime->end(601);
+      runtime->end(602);
+      runtime->end(303);
       auto terminal = input(505);
       terminal.maxNewTokens = 1;
       for (const uint32_t page : intruderPages) pool.clearPage(page);
@@ -208,8 +244,10 @@ void run(const char *metallib) {
         require(!storage.metadata(lane).assigned(), "continuation test retained an active lane");
       for (const auto *pages : {&baselinePages, &parkedPages, &intruderPages})
         for (const uint32_t page : *pages) pool.releasePage(page, false);
-      std::cout << "ram_continuation=PASS family=" << (flashNext ? "flash-next" : "dense") << " state=" << (format == ops::GdnStateFormat::Float32 ? "fp32" : "bf16")
-                << " rotations=2 sampled_tokens=" << output.size() << '\n';
+      std::cout << "ram_continuation=PASS family=" << (flashNext ? "flash-next" : "dense")
+                << " state=" << (format == ops::GdnStateFormat::Float32 ? "fp32" : "bf16")
+                << " rotations=2 sampled_tokens=" << output.size()
+                << " full_draft_accepted=" << fullBase.acceptedDraftTokens << '\n';
     }
   }
 }
@@ -217,7 +255,12 @@ void run(const char *metallib) {
 int main(int argc, const char **argv) {
   if (argc != 2) return EXIT_FAILURE;
   @autoreleasepool {
-    try { run(argv[1]); return EXIT_SUCCESS; }
-    catch (const std::exception &error) { std::cerr << error.what() << '\n'; return EXIT_FAILURE; }
+    try {
+      run(argv[1]);
+      return EXIT_SUCCESS;
+    } catch (const std::exception &error) {
+      std::cerr << error.what() << '\n';
+      return EXIT_FAILURE;
+    }
   }
 }

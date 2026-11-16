@@ -60,15 +60,16 @@ read/reclaim failure across parking.
 
 ## Activation gates
 
-A scheduling policy is intentionally absent. Native Engine source currently
-uses 30102 production lines of its 30105-line architecture budget. Adding a
+A scheduling policy is intentionally absent. The deployed-stack comparison
+uses 30102 Engine production lines of its 30105-line architecture budget;
+the refreshed upstream-main review base uses all 30105 lines. Adding a
 second suspension/admission mechanism without simplifying existing ownership
 would both exceed that gate and risk bypassing resource, cache and cancellation
 contracts. Do not raise the budget or add an exception for this experiment.
 
 Before integration, agree on a shared lifecycle for replay suspension and RAM
 parking, including KV ownership, deadlines, claim accounting and page movement.
-Then test bounded eight-user rotation and starvation, partial/full speculative
+Then test bounded eight-user rotation and starvation, intermediate speculative
 acceptance, constrained/thinking continuation, resource denial and actual
 spilled-KV failure paths. Keep that policy disabled until matched coding tests
 show lower p95 TTFT and time to 32 tokens without unacceptable inter-token gaps,
@@ -98,3 +99,21 @@ instance/identity unchanged, zero transport restarts, Samsung slots open on the
 verified external volume, Flash-Next at 96 GiB RAM/512 GiB cache, eight queue
 workers and admission/M4 disabled. Fusion and deployment were unchanged.
 See `ram-continuation-tests-20261116.json` for sanitized evidence.
+
+## Focused upstream review branch
+
+The patch was transplanted onto refreshed upstream main `d8af105` without the
+earlier cache/counter patches. Its full fake-model Engine binary passes 458/458;
+storage cases and all four synthetic numerical cases also pass on the M5. The
+architecture checker passes at 30105/30105 Engine production lines.
+`Runtime.cpp` is byte-identical to the uniformly ASan/UBSan-tested deployed-stack
+variant. ASan/UBSan were not repeated on this separate upstream base; the
+base-specific receipts keep those validations distinct. See
+`ram-continuation-upstream-tests-20261116.json`.
+
+The final numerical driver also includes a greedy control accepting all seven
+draft tokens, exercising the full retained block across a park/rebind/next-step
+sequence. These controls pass for both architectures and state formats in the
+normal upstream build and with the uniformly instrumented deployed-stack native
+library. Intermediate speculative-acceptance patterns and real-model variation
+remain separate activation gates.
