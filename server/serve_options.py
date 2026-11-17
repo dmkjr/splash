@@ -751,9 +751,14 @@ SERVE_OPTIONS = (
         ),
     ),
     ServeOption(
-        "--foreground-turn-tokens", "requests",
-        dict(type=parse_foreground_turn_tokens, default=None, metavar="TOKENS",
-             help="foreground decode tokens per shared-lane turn; 0 disables (default: 0)"),
+        "--foreground-turn-tokens",
+        "requests",
+        dict(
+            type=parse_foreground_turn_tokens,
+            default=None,
+            metavar="TOKENS",
+            help="foreground decode tokens per shared-lane turn; 0 disables (default: 0)",
+        ),
         engine=EngineArgument("--foreground-turn-tokens"),
     ),
     ServeOption(
