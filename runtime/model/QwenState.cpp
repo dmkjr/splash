@@ -1,5 +1,6 @@
 #include "model/QwenState.hpp"
 
+#include <type_traits>
 #include <cstring>
 #include <algorithm>
 #include <limits>
@@ -417,6 +418,18 @@ void QwenStateStorage::restoreParkedLane(uint32_t index, uint64_t requestId,
   destination = std::move(parked->impl_->lane);
   parked->impl_->lane = {};
   parked.reset();
+}
+
+void QwenStateStorage::exchangeParkedLane(uint32_t index, uint64_t residentId,
+                                          uint64_t parkedId, ParkedLane &parked) {
+  Lane &resident = lane(index);
+  if (backend_.commandInFlight())
+    throw std::logic_error("cannot exchange a lane with a command in flight");
+  if (parked.impl_->pool != pool_ || !residentId || !parkedId ||
+      resident.metadata.requestId != residentId || parked.metadata().requestId != parkedId)
+    throw std::logic_error("parked exchange owner or storage mismatch");
+  static_assert(std::is_nothrow_swappable_v<Lane>);
+  std::swap(resident, parked.impl_->lane);
 }
 
 void QwenStateStorage::clearForColdStart(uint32_t index) {

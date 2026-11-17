@@ -279,6 +279,7 @@ public:
       metal::AllocationFailure &refusal);
   // Caller restores scratch into the free destination first. Success consumes
   // the handle; wrong owner/storage or an occupied destination consumes nothing.
+  void exchangeParkedLane(uint32_t index, uint64_t residentId, uint64_t parkedId, ParkedLane &parked);
   void restoreParkedLane(uint32_t lane, uint64_t requestId,
                          std::unique_ptr<ParkedLane> &parked);
   // A lane that starts at length zero without a restore reads zero recurrent
