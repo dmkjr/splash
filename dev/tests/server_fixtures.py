@@ -922,6 +922,7 @@ def main_args(**overrides):
             "cache_dir": None,
             "decode_share": None,
             "max_concurrent_requests": serve_options.DEFAULT_CONCURRENT_REQUESTS,
+            "short_prefill_cohorts": False,
             "disable_ane": False,
             "recalibrate_ane": False,
             "activations": "auto",
