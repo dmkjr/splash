@@ -84,6 +84,18 @@ updates a model with Text only on as its `--language-only` installation, and
 lists the model installed so alone as it lists one installed without it;
 deleting it in the app removes every installation of the model.
 
+`ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF:IQ1_M` is
+the coding-tuned Flash-Next GGUF with 256 routed experts. It uses the
+Flash-Next tokenizer and DFlash2 draft selected by the installer. To serve
+the IQ1_M variant:
+
+```bash
+splash serve --model ISTA-DASLab/Qwen3.8-Flash-Next-GSQ-RCO-Coder-GGUF:IQ1_M
+```
+
+The target, projector and draft download is approximately 61 GB. The app
+suggests this variant on Macs with at least 128 GB of unified memory.
+
 ## MLX targets
 
 An MLX target's `quantization` gives a mode, bits and group size, and may give
