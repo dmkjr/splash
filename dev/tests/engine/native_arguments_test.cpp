@@ -151,6 +151,7 @@ void testServerCommandLines(const char *path) {
       // 4194304 / (16 x 16) patches, so the server leaves it out.
       {"image_patches_default",
        [](NativeArguments &read) { read.maxImagePatches = 16384; }},
+      {"short_prefill_cohorts", [](NativeArguments &read) { read.shortPrefillCohorts = true; }},
       {"idle_sleep", [](NativeArguments &read) { read.preventIdleSleep = false; }},
       {"disable_ane", [](NativeArguments &read) { read.neuralEngine = false; }},
       {"recalibrate_ane", [](NativeArguments &read) { read.recalibrateAne = true; }},
@@ -210,7 +211,7 @@ void testServerCommandLines(const char *path) {
            read.persistentCache == meant.persistentCache && read.cacheRoot == meant.cacheRoot &&
            read.kvFormat == meant.kvFormat && read.stateFormat == meant.stateFormat &&
            read.exactCachedStates == meant.exactCachedStates &&
-           read.decodeShare == meant.decodeShare &&
+           read.decodeShare == meant.decodeShare && read.shortPrefillCohorts == meant.shortPrefillCohorts &&
            read.maxImagePatches == meant.maxImagePatches &&
            read.idleReleaseSeconds == meant.idleReleaseSeconds &&
            read.preventIdleSleep == meant.preventIdleSleep &&
