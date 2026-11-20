@@ -58,7 +58,8 @@ Engine::Engine(EngineConfig config, Cache &cache, model::Model &model,
     : config_(config), cache_(cache), writeBehind_(cache), model_(model), events_(events),
       scheduler_({.decodeShare = config_.decodeShare,
                   .decodeGapMilliseconds = config_.decodeGapMilliseconds,
-                  .limits = model.commandLimits()},
+                  .limits = model.commandLimits(),
+                  .shortPrefillCohorts = config_.shortPrefillCohorts},
                  model) {
   if (!config_.maxContext || !config_.vocabularySize) {
     throw std::invalid_argument("context and vocabulary sizes must be positive");
@@ -718,10 +719,12 @@ bool Engine::admitQueued(double now) {
   // a 27B's command times on a 32-core M5 Max. A request waiting for a prefix
   // takes none: it would leave the freed lane to the suspended one, which
   // would resume into it and replay for nothing.
-  const bool lanesFull =
-      std::count_if(requests_.begin(), requests_.end(), [](const auto &entry) {
-        return entry.second.lane.has_value();
-      }) >= model_.commandLimits().lanes;
+  const auto occupiedLanes = std::ranges::count_if(requests_, [](const auto &entry) {
+    return entry.second.lane.has_value();
+  });
+  const auto laneCapacity = model_.commandLimits().lanes;
+  const bool lanesFull = occupiedLanes >= laneCapacity;
+  auto spareForShort = laneCapacity - occupiedLanes;
   bool laneSought = false;
   const auto waitForLane = [&](uint64_t id, Request &active) {
     scheduler_.waitForResources(id);
@@ -743,6 +746,20 @@ bool Engine::admitQueued(double now) {
     const bool ready = resourceRetryReady(active, now);
     if (!ready && !active.refusedResources)
       continue;
+    // Only spend a loan on bounded text with no recovery or interrupted pass.
+    // Keep the engine and scheduler priorities in sync for residency decisions.
+    const bool canSponsor = config_.shortPrefillCohorts && spareForShort > 0 && ready && !tier &&
+                            !passCommand_.progress() && !active.refusedResources && active.outputLimit <= 256 &&
+                            active.request.priority == RequestPriority::Background && !active.skipCache &&
+                            active.request.images.empty() && active.request.constraint == ConstraintMode::None &&
+                            scheduler_.shortPrefillBudgetAvailable();
+    if (canSponsor) {
+      const uint32_t cached = cachedTokens(active, true);
+      if (cached && !pendingSharedPrefill(active, cached) && scheduler_.sponsorShortPrefill(id, cached)) {
+        active.request.priority = RequestPriority::Normal;
+        --spareForShort;
+      }
+    }
     if (belowRunnable(active)) {
       queue(id);
       continue;
