@@ -255,7 +255,8 @@ NOTE_ALLOWANCE: dict[str, int] = {
 # conversation went on. 31,103 adds 7 for the split's warmup, which holds only
 # the pages its rows use and allocates again an extent the first audit
 # released.
-ENGINE_LINE_BUDGET = 31_103
+# The SiteKings 1.7.2 candidate carries 177 lines for the production schedulers.
+ENGINE_LINE_BUDGET = 31_280
 C_LIKE_SUFFIXES = SOURCE_SUFFIXES | {".swift"}
 HASH_COMMENT_SUFFIXES = {"", ".sh", ".bash", ".fish", ".mk", ".yml", ".yaml", ".toml"}
 C_LIKE_COMMENT = re.compile(

@@ -1951,6 +1951,40 @@ void testShortCohortsReconsiderQueuedRequestsAfterLongProgress() {
   require(sim.scheduler.sponsorShortPrefill(5, 19673), "long work did not renew the budget");
 }
 
+void testShortCohortsRespectConfiguredLanes() {
+  for (auto [laneCount, expected] : {std::pair{1, 0}, std::pair{2, 1}, std::pair{8, 3}}) {
+    auto commandLimits = limits();
+    commandLimits.lanes = laneCount;
+    Sim sim(test::kDense27B, commandLimits, 1.0, {}, true);
+    sim.lane(1, 0, 64000);
+    for (uint64_t id = 2; id <= 5; ++id)
+      sim.scheduler.submit(request(id, 20000, RequestPriority::Background));
+    sim.sampled = [](model::CommandSample &sample, const BatchPlan &) { sample.wallMilliseconds = 1200; };
+    sim.step();
+    sim.step();
+    int sponsored = 0;
+    for (uint64_t id = 2; id <= 5; ++id)
+      if (sim.scheduler.sponsorShortPrefill(id, 19673))
+        ++sponsored;
+    require(sponsored == expected, "warm cohort exceeded its configured lane budget");
+  }
+}
+
+void testDemotedShortPrefillReleasesItsCohortSlot() {
+  Sim sim(test::kDense27B, limits(), 1.0, {}, true);
+  sim.lane(1, 0, 64000);
+  for (uint64_t id = 2; id <= 5; ++id)
+    sim.scheduler.submit(request(id, 20000, RequestPriority::Background));
+  sim.sampled = [](model::CommandSample &sample, const BatchPlan &) { sample.wallMilliseconds = 2000; };
+  sim.step();
+  sim.step();
+  for (uint64_t id = 2; id <= 4; ++id)
+    require(sim.scheduler.sponsorShortPrefill(id, 19673), "short request was not sponsored");
+  require(!sim.scheduler.sponsorShortPrefill(5, 19673), "a full cohort admitted a fourth request");
+  sim.scheduler.setPriority(2, RequestPriority::Background);
+  require(sim.scheduler.sponsorShortPrefill(5, 19673), "a demoted request kept its cohort slot");
+}
+
 void testSponsoredDecodeCanFinishBeforeCuttingLongPrefill() {
   Sim sim(test::kDense27B, limits(), 0.0, {}, true);
   sim.lane(1, 0, 64000);
@@ -1979,6 +2013,8 @@ void testSponsoredDecodeCanFinishBeforeCuttingLongPrefill() {
 }
 
 constexpr test::TestCase kTests[] = {
+    {"testDemotedShortPrefillReleasesItsCohortSlot", testDemotedShortPrefillReleasesItsCohortSlot},
+    {"testShortCohortsRespectConfiguredLanes", testShortCohortsRespectConfiguredLanes},
     {"testSponsoredDecodeCanFinishBeforeCuttingLongPrefill", testSponsoredDecodeCanFinishBeforeCuttingLongPrefill},
     {"testShortCohortsReconsiderQueuedRequestsAfterLongProgress", testShortCohortsReconsiderQueuedRequestsAfterLongProgress},
     {"testRealDecodeWidths", testRealDecodeWidths},
