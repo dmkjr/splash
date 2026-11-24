@@ -223,6 +223,7 @@ bootstrapConfig(const engine::NativeArguments &arguments) {
   config.resources.cacheDiskWritesPerDay = arguments.maxCacheDiskWritesBytes;
   config.resources.persistentCache = arguments.persistentCache;
   config.resources.cacheRoot = arguments.cacheRoot;
+  config.resources.cacheRootRequired = arguments.persistentCache && !arguments.cacheRoot.empty();
   if (const std::filesystem::path caches = splashCaches();
       config.resources.cacheRoot.empty() && !caches.empty())
     config.resources.cacheRoot = caches / "prefix-cache";

@@ -649,11 +649,86 @@ void testForeignDirectoriesAreRefused() {
           "a cache directory others may write to was opened");
 }
 
+// A root whose volume keeps interrupting its opens for longer than open()'s
+// own bounded retry, as a removable volume does while macOS settles its
+// access, opens once the interruptions stop. A volume that never settles, a
+// cancelled start and a permanent error each escape with their errno, and
+// the namespace another process holds still gives null.
+void testPatientOpen() {
+  using cache_syscall_test::Armed;
+  using cache_syscall_test::Fault;
+  using cache_syscall_test::Operation;
+  {
+    Root root;
+    Fault fault{Operation::open, root.path().string(), std::vector<int>(20, EINTR)};
+    Armed armed(fault);
+    auto directory = CacheDirectory::openPatiently(root.path(), kNamespace, 0ms, 10s, {}, 1ms);
+    require(directory && fault.calls == 21, "patient open did not outlast the interruptions");
+  }
+  for (const int transientError : {EAGAIN, EBUSY}) {
+    Root root;
+    Fault fault{Operation::mkdir, root.path().string(), {transientError, transientError}};
+    Armed armed(fault);
+    auto directory = CacheDirectory::openPatiently(root.path(), kNamespace, 0ms, 10s, {}, 1ms);
+    require(directory && fault.calls == 3, "patient open did not retry a busy volume");
+  }
+  {
+    Root root;
+    Fault fault{Operation::open, root.path().string(), std::vector<int>(1u << 20, EINTR)};
+    Armed armed(fault);
+    const auto started = std::chrono::steady_clock::now();
+    bool failed = false;
+    try {
+      static_cast<void>(CacheDirectory::openPatiently(root.path(), kNamespace, 0ms, 50ms, {}, 5ms));
+    } catch (const std::system_error &error) {
+      failed = error.code() == std::error_code(EINTR, std::generic_category());
+    }
+    require(failed, "a volume that never settled did not escape with EINTR");
+    require(std::chrono::steady_clock::now() - started < 5s, "patient open outlived its wait");
+    require(fault.calls >= 16, "patient open gave up before its wait");
+  }
+  {
+    Root root;
+    Fault fault{Operation::open, root.path().string(), std::vector<int>(1u << 20, EINTR)};
+    Armed armed(fault);
+    bool failed = false;
+    try {
+      static_cast<void>(
+          CacheDirectory::openPatiently(root.path(), kNamespace, 0ms, 10min, [] { return true; }, 1ms));
+    } catch (const std::system_error &error) {
+      failed = error.code() == std::error_code(EINTR, std::generic_category());
+    }
+    require(failed && fault.calls == 8, "a cancelled start kept retrying");
+  }
+  {
+    Root root;
+    Fault fault{Operation::open, root.path().string(), {EACCES}};
+    Armed armed(fault);
+    bool failed = false;
+    try {
+      static_cast<void>(CacheDirectory::openPatiently(root.path(), kNamespace, 0ms, 10min, {}, 1ms));
+    } catch (const std::system_error &error) {
+      failed = error.code() == std::error_code(EACCES, std::generic_category());
+    }
+    require(failed && fault.calls == 1, "a permanent error was retried as transient");
+  }
+  {
+    Root root;
+    auto holder = root.open();
+    require(!CacheDirectory::openPatiently(root.path(), kNamespace, 0ms, 10s, {}, 1ms),
+            "a held namespace did not give null");
+  }
+  require(!CacheDirectory::transient(std::system_error(EIO, std::generic_category())) &&
+              CacheDirectory::transient(std::system_error(EINTR, std::generic_category())),
+          "transient errors are misclassified");
+}
+
 } // namespace
 
 int main() {
   try {
     testInterruptedDirectorySyscalls();
+    testPatientOpen();
     testDirectoryErrorsKeepTheirErrno();
     testDirectoryRetryBoundAndSecurity();
     testInterruptedLockOpen();

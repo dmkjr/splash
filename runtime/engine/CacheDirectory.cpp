@@ -212,6 +212,33 @@ CacheDirectory::open(const std::filesystem::path &root, std::string_view cacheNa
   return result;
 }
 
+bool CacheDirectory::transient(const std::system_error &error) noexcept {
+  if (error.code().category() != std::generic_category() &&
+      error.code().category() != std::system_category())
+    return false;
+  const int value = error.code().value();
+  return value == EINTR || value == EAGAIN || value == EBUSY;
+}
+
+std::unique_ptr<CacheDirectory>
+CacheDirectory::openPatiently(const std::filesystem::path &root, std::string_view cacheNamespace,
+                              std::chrono::milliseconds lockWait,
+                              std::chrono::milliseconds transientWait,
+                              const std::function<bool()> &cancelled,
+                              std::chrono::milliseconds retryEvery) {
+  const auto deadline = AwakeClock::now() + transientWait;
+  for (;;) {
+    try {
+      return open(root, cacheNamespace, lockWait, cancelled);
+    } catch (const std::system_error &error) {
+      if (!transient(error) || AwakeClock::now() >= deadline || (cancelled && cancelled()))
+        throw;
+    }
+    std::this_thread::sleep_for(
+        std::min<AwakeClock::duration>(retryEvery, deadline - AwakeClock::now()));
+  }
+}
+
 std::vector<CacheDirectory::Idle> CacheDirectory::idle(const std::filesystem::path &root) noexcept {
   std::vector<Idle> result;
   try {
