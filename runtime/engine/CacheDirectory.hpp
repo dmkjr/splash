@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <vector>
 
 namespace splash::engine {
@@ -58,6 +59,20 @@ public:
   [[nodiscard]] static std::unique_ptr<CacheDirectory>
   open(const std::filesystem::path &root, std::string_view cacheNamespace,
        std::chrono::milliseconds lockWait, const std::function<bool()> &cancelled = {});
+  // open(), tried again every retryEvery while it fails with an error a
+  // drive gets over (transient()): a removable volume whose access macOS has
+  // not settled yet interrupts every open for a while, longer than open()'s
+  // own bounded retry of an interrupted call. The last such error escapes
+  // once transientWait has passed, or once cancelled(); any other error
+  // escapes at once, and a namespace another process holds still gives null.
+  [[nodiscard]] static std::unique_ptr<CacheDirectory>
+  openPatiently(const std::filesystem::path &root, std::string_view cacheNamespace,
+                std::chrono::milliseconds lockWait, std::chrono::milliseconds transientWait,
+                const std::function<bool()> &cancelled = {},
+                std::chrono::milliseconds retryEvery = std::chrono::milliseconds(500));
+  // An error opening a cache directory that the drive may get over: an
+  // interrupted call, a busy or temporarily unavailable volume.
+  [[nodiscard]] static bool transient(const std::system_error &error) noexcept;
   // The namespaces under root whose lock nobody holds, this process's own
   // included, oldest first; a directory of any other name is none.
   // Housekeeping: one that cannot be looked at is left out.

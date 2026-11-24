@@ -82,6 +82,8 @@ constexpr std::chrono::seconds kCacheLockWait{20};
 static_assert(kCacheLockWait > supervision::kStop);
 // A cache nobody opened or wrote for this long is removed at the next start,
 // whether or not that start keeps a cache itself.
+// Allow transient errors while macOS is settling a removable volume.
+constexpr std::chrono::seconds kCacheRootWait{60};
 constexpr std::chrono::hours kStaleCache{24 * 14};
 // How long a start serves on probation (supervision::kProbation).
 constexpr auto kProbation = supervision::kProbation;
@@ -107,17 +109,19 @@ PersistentCacheFiles openPersistentCache(const std::filesystem::path &root,
                                          const model::SlotFile::Options &kvOptions,
                                          uint64_t stateSlotBytes, const model::SlotFile::Options &stateOptions,
                                          const std::shared_ptr<model::DiskBudget> &budget,
-                                         const std::function<bool()> &cancelled) {
+                                         const std::function<bool()> &cancelled, bool required) {
   try {
     if (root.empty())
       throw std::runtime_error("no home directory to keep it in");
     std::error_code ignored;
     const bool made = !std::filesystem::exists(root, ignored);
     PersistentCacheFiles files;
-    files.directory = CacheDirectory::open(root, cacheNamespace, kCacheLockWait, cancelled);
+    files.directory = CacheDirectory::openPatiently(root, cacheNamespace, kCacheLockWait, kCacheRootWait, cancelled);
     if (made && std::filesystem::exists(root, ignored))
       excludeFromBackups(root);
     if (!files.directory) {
+      if (required)
+        throw std::runtime_error("cache directory is held or startup was cancelled");
       if (!cancelled || !cancelled())
         logLine("Persistent cache ", (root / cacheNamespace).string(),
                 " is in use by another process; this one keeps a temporary cache.");
@@ -138,6 +142,11 @@ PersistentCacheFiles openPersistentCache(const std::filesystem::path &root,
         stateOptions);
     return files;
   } catch (const std::exception &error) {
+    if (required)
+      throw RuntimeResourcesError(RuntimeResourceStage::StorageAllocation,
+                                  "persistent cache " + (root / cacheNamespace).string() +
+                                      " cannot be used (" + error.what() +
+                                      "); --cache-dir keeps the SSD cache there");
     logLine("Persistent cache disabled (", error.what(), "); this process keeps a temporary cache.");
     return {};
   }
@@ -240,10 +249,12 @@ DiskTier openDiskTier(const RuntimeResourcesConfig &config, const std::string &c
     if (config.persistentCache && !rootRefusal) {
       tier.persistent = openPersistentCache(config.cacheRoot, cacheNamespace, kvSlotBytes, kvLabelBytes,
                                             kvOptions, stateSlotBytes, stateOptions, tier.budget,
-                                            config.cancelled);
+                                            config.cancelled, config.cacheRootRequired);
       tier.states = tier.persistent.states;
     }
-    if (!tier.states && temporaryRefusal) {
+    if (!tier.states && rootRefusal && config.cacheRootRequired) {
+      tier.offReason = "for its root, " + *rootRefusal;
+    } else if (!tier.states && temporaryRefusal) {
       if (rootRefusal)
         tier.offReason = "for its root, " + *rootRefusal + "; for temporary files, " + *temporaryRefusal;
       else

@@ -123,6 +123,11 @@ struct RuntimeResourcesConfig {
   // back (--persistent-cache), instead of temporary files that go with the
   // process.
   bool persistentCache = false;
+  // cacheRoot was named (--cache-dir), not defaulted: the operator put the
+  // tier's files on that volume, so a start that cannot hold its cache there
+  // fails instead of keeping temporary files on another one, such as the
+  // startup disk $TMPDIR is on.
+  bool cacheRootRequired = false;
   // The volume a directory lives on (volumeOf), which the automatic quota
   // reads for each place the tier may keep its files before it opens them,
   // and the tier at each measure for the place they opened in (DiskSpace).
