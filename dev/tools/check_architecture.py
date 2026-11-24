@@ -263,7 +263,8 @@ NOTE_ALLOWANCE: dict[str, int] = {
 # budget refuses: the states that pin them leave, oldest first, and a Full
 # extent their trims empty beyond the lanes' floors pays for the Slim ones
 # (Cache::releaseTails).
-ENGINE_LINE_BUDGET = 31_209
+# Add the 177 engine lines from the production Coder scheduling stack.
+ENGINE_LINE_BUDGET = 31_386
 C_LIKE_SUFFIXES = SOURCE_SUFFIXES | {".swift"}
 HASH_COMMENT_SUFFIXES = {"", ".sh", ".bash", ".fish", ".mk", ".yml", ".yaml", ".toml"}
 C_LIKE_COMMENT = re.compile(
