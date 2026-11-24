@@ -57,6 +57,7 @@ struct NativeArguments final {
   bool exactCachedStates = false;
   double decodeShare = EngineConfig{}.decodeShare;
   bool shortPrefillCohorts = false;
+  uint32_t foregroundTurnTokens = 0;
   uint32_t maxImagePatches = ops::kMaximumImagePatches;
   // --idle-release SECONDS|off, infinite for off.
   double idleReleaseSeconds = RuntimeResourcesConfig{}.idleReleaseSeconds;

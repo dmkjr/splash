@@ -922,6 +922,7 @@ def main_args(**overrides):
             "decode_share": None,
             "max_concurrent_requests": serve_options.DEFAULT_CONCURRENT_REQUESTS,
             "short_prefill_cohorts": False,
+            "foreground_turn_tokens": None,
             "disable_ane": False,
             "recalibrate_ane": False,
             "activations": "auto",

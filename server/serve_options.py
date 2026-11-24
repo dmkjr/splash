@@ -282,6 +282,16 @@ def parse_concurrent_requests(value):
     return requests
 
 
+def parse_foreground_turn_tokens(value):
+    try:
+        tokens = int(value)
+        if 0 <= tokens <= 4096:
+            return tokens
+    except ValueError:
+        pass
+    raise argparse.ArgumentTypeError("must be an integer in [0, 4096]")
+
+
 def parse_decode_share(value):
     try:
         share = float(value)
@@ -871,6 +881,17 @@ SERVE_OPTIONS = (
             f"{DEFAULT_CONCURRENT_REQUESTS})",
         ),
         engine=EngineArgument("--max-concurrent-requests"),
+    ),
+    ServeOption(
+        "--foreground-turn-tokens",
+        "requests",
+        dict(
+            type=parse_foreground_turn_tokens,
+            default=None,
+            metavar="TOKENS",
+            help="foreground decode tokens per shared-lane turn; 0 disables (default: 0)",
+        ),
+        engine=EngineArgument("--foreground-turn-tokens"),
     ),
     ServeOption(
         "--decode-share",
