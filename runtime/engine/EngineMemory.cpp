@@ -696,20 +696,28 @@ uint32_t Engine::reserveCaptures(Request &active, const BatchItem &item,
            : boundaries[index].tokens == promptReplayBoundary(active) ? StateClass::InUse
                                                                       : StateClass::Ordinary;
   };
+  const auto isTail = [&](size_t index) { return boundaries[index].tail; };
+  // The class of the last state the command captured, a checkpoint's
+  // buffers the replay point may take, and whether it is the tail's.
+  bool lastDisposable = false;
+  bool lastTail = false;
   // Takes the buffers of the state at boundaries[index]; false when refused.
   // Only the command's first state follows the lane's checkpoint, its
   // recovery point; each later one follows the state before it, since a
-  // checkpoint the command passes is no recovery point.
+  // checkpoint the command passes is no recovery point. The tail checkpoint
+  // refused its buffers, with no SSD to take it, is dropped, not cut at: the
+  // command goes on past it.
   const auto reserve = [&](size_t index) {
     const uint32_t tokens = boundaries[index].tokens;
     const StateClass kind = stateClass(index);
-    if (keepsCheckpoint(active, boundaries[index]) && !states.empty() && boundaries[index - 1].disposable) {
-      // The prompt's replay point and the head's state keep the checkpoint
-      // captured before them beside buffers of their own, in their claim.
-      // Refused the pool and the admission, each takes that checkpoint's
-      // buffers, as it takes its lane's after a command: nothing is freed
-      // for it.
-      auto buffers = reserveStateBuffers(active, tokens, stateClaim(active, kind, supersedes), Refusal::SettledOnce).buffers;
+    if (keepsCheckpoint(active, boundaries[index]) && !states.empty() && lastDisposable) {
+      // Keep the preceding capture if there is room. At replay, give a
+      // captured tail an optional ledger pass before reusing its buffers.
+      const bool keepTail = kind == StateClass::InUse && lastTail;
+      const auto kept = keepTail ? keepRecoveryPoint(active) : std::nullopt;
+      auto buffers = reserveStateBuffers(active, tokens,
+                                         stateClaim(active, keepTail ? StateClass::Checkpoint : kind, supersedes),
+                                         keepTail ? Refusal::Settled : Refusal::SettledOnce).buffers;
       if (buffers) {
         states.push_back({tokens, std::move(buffers)});
         captures.push_back({tokens});
@@ -717,28 +725,40 @@ uint32_t Engine::reserveCaptures(Request &active, const BatchItem &item,
         states.back().tokens = tokens;
         captures.back().tokens = tokens;
       }
+      lastDisposable = lastTail = false;
       return true;
     }
-    Reservation reservation = reserveCapture(active, kind, tokens, states.empty(), supersedes);
+    Reservation reservation =
+        reserveCapture(active, kind, tokens, states.empty(), supersedes, isTail(index));
     if (!reservation.buffers) {
+      // A tail the SSD can take ends its command there to go to it from the
+      // lane: a cut costs a command boundary, a lost tail up to a checkpoint
+      // interval of prefill. Otherwise, with no SSD or while the one state
+      // write is in flight, which would refuse it, it is dropped, except at
+      // the command's end, where the lane's state is the tail's.
+      if (isTail(index) && (!model_.canSnapshotToDisk(false) || cache_.stateWriting()) &&
+          (tokens != end || !reservation.fromLane))
+        return true;
       if (reservation.fromLane)
         captures.push_back({tokens, false, true});
       return false;
     }
     states.push_back({tokens, std::move(reservation.buffers)});
     captures.push_back({tokens, reservation.recycled});
+    lastDisposable = boundaries[index].disposable;
+    lastTail = isTail(index);
     return true;
   };
   for (size_t index = active.stateBoundaryCursor;
        index < boundaries.size() && boundaries[index].tokens <= end; ++index) {
     const uint32_t tokens = boundaries[index].tokens;
-    // Published, every state but the prompt's replay point and the head's
+    // Published, every state but the prompt's replay point and the head's and the tail
     // retires the checkpoint before it (apply, keepsCheckpoint): a
     // checkpoint the command passes on its way to such a state is not
     // captured, and that state takes buffers of its own class.
     const bool passed = boundaries[index].disposable && index + 1 < boundaries.size() &&
                         boundaries[index + 1].tokens <= end &&
-                        !keepsCheckpoint(active, boundaries[index + 1]);
+                        !keepsCheckpoint(active, boundaries[index + 1]) && !isTail(index + 1);
     if (!passed && !reserve(index))
       return tokens - start;
     if (tokens == end)
@@ -817,7 +837,7 @@ Engine::Reservation Engine::reserveStateBuffers(Request &active, uint32_t tokens
 }
 
 Engine::Reservation Engine::reserveCapture(Request &active, StateClass kind, uint32_t tokens,
-                                           bool followsCheckpoint, bool supersedes) {
+                                           bool followsCheckpoint, bool supersedes, bool tail) {
   // The lane's checkpoint is its recovery point until a state that retires
   // it is published after a completed command (a cancelled, expired or
   // failed one leaves it to a retry). So no state takes its buffers before
@@ -829,14 +849,32 @@ Engine::Reservation Engine::reserveCapture(Request &active, StateClass kind, uin
   // pins takes no room either: apply publishes it from the lane only once
   // the pin has gone, keeping the predecessor the recovery point until then.
   // Otherwise room comes from what the ledger frees for the state's claim
-  // (stateClaim).
+  // (stateClaim). So it does for the tail checkpoint, which a refusal drops
+  // rather than ends the command at (reserveCaptures), and for the replay
+  // point while the tail is the lane's checkpoint: the ledger keeps the
+  // tail, which may cost one claim's ledger pass a prompt, at its end. The
+  // lane's recovery checkpoint stays out of that pass's reach, pinned for
+  // it (keepRecoveryPoint): erased without an SSD, a command that fails or
+  // expires would resume before it.
   const bool predecessorPinned =
       kind == StateClass::Checkpoint && followsCheckpoint && checkpointPinned(active);
   const bool fromLane = predecessorPinned || checkpointReclaimable(active);
-  auto result = reserveStateBuffers(active, tokens, stateClaim(active, kind, supersedes),
-                                    fromLane ? Refusal::SettledOnce : Refusal::Settled);
+  const bool ledgerFirst =
+      !predecessorPinned &&
+      (tail || (kind == StateClass::InUse && followsCheckpoint && holdsTailCheckpoint(active)));
+  // The ledger pass that keeps a tail claims as an optional checkpoint.
+  const ClaimSpec spec = stateClaim(active, fromLane && ledgerFirst ? StateClass::Checkpoint : kind, supersedes);
+  const auto kept = fromLane && ledgerFirst ? keepRecoveryPoint(active) : std::nullopt;
+  auto result = reserveStateBuffers(active, tokens, spec,
+                                    fromLane && !ledgerFirst ? Refusal::SettledOnce : Refusal::Settled);
   result.fromLane = !result.buffers && fromLane;
   return result;
+}
+
+std::optional<CompositeStateLease> Engine::keepRecoveryPoint(const Request &active) {
+  if (!active.latestCheckpoint)
+    return std::nullopt;
+  return cache_.pinState(active.latestCheckpoint.kvBlock);
 }
 
 Engine::ClaimHandle::ClaimHandle(ClaimHandle &&other) noexcept

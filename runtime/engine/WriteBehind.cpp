@@ -4,7 +4,7 @@ namespace splash::engine {
 
 WriteBehind::WriteBehind(Cache &cache) : cache_(cache), copying_(cache.persistent()) {}
 
-void WriteBehind::published(uint64_t block, uint32_t tokens, double now, bool head) {
+void WriteBehind::published(uint64_t block, uint32_t tokens, double now, bool head, bool secondary) {
   head = head && cache_.persistent();
   if (!cache_.kvTierWritable() || (tokens < kMinimumTokens && !head) || queued_.contains(block))
     return;
@@ -13,14 +13,14 @@ void WriteBehind::published(uint64_t block, uint32_t tokens, double now, bool he
   copying_ = copying();
   if (!copying_)
     std::erase_if(waiting_, [&](const Point &point) {
-      if (cache_.newestPoint(point.block))
+      if (cache_.newestPoint(point.block) || (point.secondary && cache_.secondaryCheckpoint(point.block)))
         return false;
       queued_.erase(point.block);
       ++counters_.unneeded;
       return true;
     });
   queued_.insert(block);
-  waiting_.push_back({block, now + kDelayMilliseconds, head});
+  waiting_.push_back({block, now + kDelayMilliseconds, head, secondary});
 }
 
 bool WriteBehind::settle(PersistStatus status) {
@@ -92,7 +92,7 @@ bool WriteBehind::step(double now, bool claimWaiting, const std::function<bool()
       stopped_ = Stop::Covered;
       break;
     }
-    if (!settle(cache_.persist(point->block, point->head))) {
+    if (!settle(cache_.persist(point->block, point->head, point->secondary))) {
       stopped_ = Stop::Stalled;
       break;
     }
@@ -109,7 +109,7 @@ bool WriteBehind::flush() {
   cache_.liftDiskWriteBudget();
   while (!waiting_.empty()) {
     const Point &point = waiting_.back();
-    if (!settle(cache_.persist(point.block, point.head)))
+    if (!settle(cache_.persist(point.block, point.head, point.secondary)))
       return false;
     queued_.erase(point.block);
     waiting_.pop_back();

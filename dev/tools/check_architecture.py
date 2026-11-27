@@ -264,7 +264,9 @@ NOTE_ALLOWANCE: dict[str, int] = {
 # extent their trims empty beyond the lanes' floors pays for the Slim ones
 # (Cache::releaseTails).
 # Add the 177 engine lines from the production Coder scheduling stack.
-ENGINE_LINE_BUDGET = 31_386
+# 31,683 adds 297 for checkpoint capture, restore and reclaimed-buffer
+# ordering from #784/#785, ported to the Coder release branch.
+ENGINE_LINE_BUDGET = 31_683
 C_LIKE_SUFFIXES = SOURCE_SUFFIXES | {".swift"}
 HASH_COMMENT_SUFFIXES = {"", ".sh", ".bash", ".fish", ".mk", ".yml", ".yaml", ".toml"}
 C_LIKE_COMMENT = re.compile(
